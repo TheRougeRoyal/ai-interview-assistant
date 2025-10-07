@@ -1,0 +1,90 @@
+%PDF-1.4
+1 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+
+2 0 obj
+<<
+/Type /Pages
+/Kids [3 0 R]
+/Count 1
+>>
+endobj
+
+3 0 obj
+<<
+/Type /Page
+/Parent 2 0 R
+/Resources <<
+/Font <<
+/F1 <<
+/Type /Font
+/Subtype /Type1
+/BaseFont /Helvetica
+>>
+>>
+>>
+/MediaBox [0 0 612 792]
+/Contents 4 0 R
+>>
+endobj
+
+4 0 obj
+<<
+/Length 788
+>>
+stream
+BT
+/F1 12 Tf
+50 750 Td
+14 TL
+(John Doe) '
+(john.doe@example.com) '
+(+1 \(555\) 123-4567) '
+() '
+(PROFESSIONAL SUMMARY) '
+(Experienced software engineer with 5+ years in full-stack development.) '
+(Specializing in React, Node.js, and cloud technologies.) '
+() '
+(EXPERIENCE) '
+(Senior Software Engineer - Tech Corp) '
+(2020 - Present) '
+(- Led development of microservices architecture) '
+(- Implemented CI/CD pipelines) '
+(- Mentored junior developers) '
+() '
+(Junior Developer - StartupXYZ) '
+(2018 - 2020) '
+(- Built React applications) '
+(- Worked with REST APIs) '
+(- Collaborated in agile teams) '
+() '
+(EDUCATION) '
+(Bachelor of Science in Computer Science) '
+(State University, 2018) '
+() '
+(SKILLS) '
+(JavaScript, TypeScript, React, Node.js, Python, AWS, Docker, Kubernetes) '
+ET
+
+endstream
+endobj
+
+xref
+0 5
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000317 00000 n 
+trailer
+<<
+/Size 5
+/Root 1 0 R
+>>
+startxref
+1188
+%%EOF

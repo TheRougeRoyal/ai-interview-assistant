@@ -1,0 +1,24 @@
+{
+  "hasBackend": true,
+  "baseUrl": "http://localhost:3000",
+  "routes": [
+    {"method": "GET", "path": "/api/candidates"},
+    {"method": "GET", "path": "/api/candidates/[id]"},
+    {"method": "POST", "path": "/api/parse-resume"},
+    {"method": "POST", "path": "/api/generate-question"},
+    {"method": "POST", "path": "/api/score-answer"},
+    {"method": "POST", "path": "/api/summary"},
+    {"method": "POST", "path": "/api/sessions"},
+    {"method": "POST", "path": "/api/sessions/[id]/answers"}
+  ],
+  "auth": {
+    "type": "cookie",
+    "header": "Authorization",
+    "scheme": "Bearer"
+  },
+  "pagination": {
+    "pageParam": "page",
+    "limitParam": "limit",
+    "defaultLimit": 20
+  }
+}
