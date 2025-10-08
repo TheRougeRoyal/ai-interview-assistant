@@ -1,5 +1,5 @@
 
-````markdown
+
 # 🧠 AI Interview Assistant
 
 A comprehensive **AI-powered interview platform** built with **Next.js 15**, featuring dual interfaces for interviewees and interviewers, automated question generation, real-time scoring, resume intelligence, and session recovery — all in a secure, accessible, and production-ready architecture.
