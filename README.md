@@ -1,8 +1,3 @@
-Perfect ✅ — here’s your **finalized, copy-and-paste-ready `README.md`** for GitHub.
-It merges both versions cleanly, fixes hierarchy issues, removes duplicates, and uses consistent Markdown (✅ badges, proper code blocks, clear sectioning).
-You can paste this directly into your repository root as `README.md`.
-
----
 
 ````markdown
 # 🧠 AI Interview Assistant
