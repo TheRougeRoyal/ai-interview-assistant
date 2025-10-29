@@ -1,21 +1,53 @@
-import {
-  ServicePrincipalCredentials,
-  PDFServices,
-  MimeType,
-  ExtractPDFJob,
-  ExtractPDFParams,
-  ExtractElementType,
-  SDKError,
-  ServiceUsageError,
-  ServiceApiError
-} from '@adobe/pdfservices-node-sdk';
 import { Readable } from 'stream';
+
+declare const __non_webpack_require__: ((modulePath: string) => any) | undefined;
+
+type AdobePDFServicesModule = {
+  ServicePrincipalCredentials: new (args: { clientId: string; clientSecret: string }) => any;
+  PDFServices: new (args: { credentials: any }) => any;
+  MimeType: { PDF: string };
+  ExtractPDFJob: new (args: { inputAsset: any; params: any }) => any;
+  ExtractPDFParams: new (args: { elementsToExtract: any[] }) => any;
+  ExtractElementType: { TEXT: any; TABLES?: any };
+  SDKError: new (...args: any[]) => Error;
+  ServiceUsageError: new (...args: any[]) => Error;
+  ServiceApiError: new (...args: any[]) => Error;
+};
+
+const loadAdobeSDK = (): AdobePDFServicesModule | null => {
+  const moduleName = '@adobe/pdfservices-node-sdk';
+
+  const runtimeRequire = (() => {
+    if (typeof __non_webpack_require__ === 'function') {
+      return __non_webpack_require__;
+    }
+
+    try {
+      return eval('require') as (modulePath: string) => AdobePDFServicesModule;
+    } catch {
+      return null;
+    }
+  })();
+
+  if (!runtimeRequire) {
+    console.warn('Runtime require is not available to load Adobe PDF Services SDK');
+    return null;
+  }
+
+  try {
+    return runtimeRequire(moduleName);
+  } catch (error) {
+    console.warn('Adobe PDF Services SDK is not available:', error);
+    return null;
+  }
+};
 
 /**
  * Adobe PDF Services configuration and client
  */
 class AdobePDFService {
-  private pdfServices: PDFServices | null = null;
+  private sdk: AdobePDFServicesModule | null = null;
+  private pdfServices: any = null;
   private isEnabled: boolean = false;
 
   constructor() {
@@ -26,22 +58,31 @@ class AdobePDFService {
     try {
       const clientId = process.env.ADOBE_CLIENT_ID;
       const useAdobe = process.env.USE_ADOBE_PDF_SERVICES === 'true';
-      
+
       if (!useAdobe || !clientId) {
         console.log('Adobe PDF Services disabled or not configured');
         return;
       }
 
+      const sdk = loadAdobeSDK();
+
+      if (!sdk) {
+        console.warn('Adobe PDF Services SDK could not be loaded. Skipping initialization.');
+        return;
+      }
+
+      this.sdk = sdk;
+
       // Initialize credentials with client ID (API key)
-      const credentials = new ServicePrincipalCredentials({
+      const credentials = new sdk.ServicePrincipalCredentials({
         clientId: clientId,
         clientSecret: '', // Not needed for some API key configurations
       });
 
       // Create PDF Services instance
-      this.pdfServices = new PDFServices({ credentials });
+      this.pdfServices = new sdk.PDFServices({ credentials });
       this.isEnabled = true;
-      
+
       console.log('Adobe PDF Services initialized successfully');
     } catch (error) {
       console.error('Failed to initialize Adobe PDF Services:', error);
@@ -66,30 +107,30 @@ class AdobePDFService {
 
     try {
       console.log(`Extracting text from PDF: ${file.name} using Adobe PDF Services`);
-      
+
       // Convert File to Buffer and create readable stream
       const arrayBuffer = await file.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
       const readableStream = Readable.from(buffer);
-      
+
       const inputAsset = await this.pdfServices!.upload({
         readStream: readableStream,
-        mimeType: MimeType.PDF
+        mimeType: this.sdk!.MimeType.PDF
       });
 
       // Create parameters for extraction
-      const params = new ExtractPDFParams({
-        elementsToExtract: [ExtractElementType.TEXT]
+      const params = new this.sdk!.ExtractPDFParams({
+        elementsToExtract: [this.sdk!.ExtractElementType.TEXT]
       });
 
       // Create extraction job
-      const job = new ExtractPDFJob({ inputAsset, params });
-      
+      const job = new this.sdk!.ExtractPDFJob({ inputAsset, params });
+
       // Submit job and get the result
       const pollingURL = await this.pdfServices!.submit({ job });
-      const pdfServicesResponse = await this.pdfServices!.getJobResult({ 
+      const pdfServicesResponse = await this.pdfServices!.getJobResult({
         pollingURL,
-        resultType: ExtractPDFJob as any
+        resultType: this.sdk!.ExtractPDFJob as any
       });
 
       // Download the result - handle unknown type
@@ -109,12 +150,21 @@ class AdobePDFService {
 
     } catch (error) {
       console.error('Adobe PDF extraction error:', error);
-      
-      if (error instanceof SDKError || error instanceof ServiceUsageError || error instanceof ServiceApiError) {
-        throw new Error(`Adobe PDF Services error: ${error.message}`);
+      const err = error as Error;
+
+      if (
+        this.sdk &&
+        (err instanceof this.sdk.SDKError ||
+          err instanceof this.sdk.ServiceUsageError ||
+          err instanceof this.sdk.ServiceApiError)
+      ) {
+        throw new Error(`Adobe PDF Services error: ${err.message}`);
       }
-      
-      throw new Error(`Failed to extract text from PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
+
+      const fallbackMessage =
+        err && typeof err === 'object' && 'message' in err ? String((err as { message: unknown }).message) : 'Unknown error';
+
+      throw new Error(`Failed to extract text from PDF: ${fallbackMessage}`);
     }
   }
 
@@ -180,22 +230,22 @@ class AdobePDFService {
       
       const inputAsset = await this.pdfServices!.upload({
         readStream: readableStream,
-        mimeType: MimeType.PDF
+        mimeType: this.sdk!.MimeType.PDF
       });
 
       // Extract with more elements including metadata
-      const params = new ExtractPDFParams({
+      const params = new this.sdk!.ExtractPDFParams({
         elementsToExtract: [
-          ExtractElementType.TEXT,
-          ExtractElementType.TABLES,
+          this.sdk!.ExtractElementType.TEXT,
+          this.sdk!.ExtractElementType.TABLES,
         ]
       });
 
-      const job = new ExtractPDFJob({ inputAsset, params });
+      const job = new this.sdk!.ExtractPDFJob({ inputAsset, params });
       const pollingURL = await this.pdfServices!.submit({ job });
       const pdfServicesResponse = await this.pdfServices!.getJobResult({
         pollingURL,
-        resultType: ExtractPDFJob as any
+        resultType: this.sdk!.ExtractPDFJob as any
       });
 
       const result = pdfServicesResponse.result as any;
