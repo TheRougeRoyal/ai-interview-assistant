@@ -1,0 +1,23 @@
+# Dependencies
+node_modules
+npm-debug.log
+yarn-error.log
+
+# Next.js
+.next
+out
+
+# Env
+.env*
+!.env.example
+
+# VCS
+.git
+.gitignore
+
+# OS
+.DS_Store
+
+# Prisma local DBs
+prisma/*.db*
+prisma/migrations/*/steps.json

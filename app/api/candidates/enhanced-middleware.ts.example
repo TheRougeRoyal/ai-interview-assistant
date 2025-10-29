@@ -1,0 +1,218 @@
+/**
+ * Example of candidates API route using the enhanced middleware stack
+ * This demonstrates the complete integration of all middleware components
+ */
+
+import { NextRequest } from 'next/server'
+import { success } from '@/lib/errors'
+import { createOrUpsertCandidate, listCandidates, updateCandidateWithResumeAnalysis } from '@/lib/db/repositories/candidatesRepo'
+import { ask } from '@/lib/ai/gateway'
+import { 
+  withMiddleware, 
+  MiddlewarePresets, 
+  ValidationPresets,
+  type RequestContext 
+} from '@/lib/middleware'
+import { getApiLogger, getAiServiceLogger } from '@/lib/logging'
+
+export const dynamic = 'force-dynamic'
+
+/**
+ * GET /api/candidates - List candidates with enhanced middleware
+ */
+export const GET = withMiddleware(
+  async (req: NextRequest, context: RequestContext) => {
+    const logger = getApiLogger({ operation: 'list_candidates', userId: context.user?.id })
+    
+    logger.info('Processing candidate list request', {
+      userId: context.user?.id,
+      userRole: context.user?.role
+    })
+    
+    // Extract validated query parameters from context
+    const { page = 1, limit = 10, cursor, sortBy, order, q } = context.metadata.query || {}
+    
+    logger.debug('Query parameters', { page, limit, cursor, sortBy, order, q })
+    
+    // Fetch candidates
+    const data = await listCandidates({ 
+      q, 
+      limit, 
+      cursor, 
+      sortBy: sortBy as 'finalScore' | 'createdAt', 
+      order: order as 'asc' | 'desc' 
+    })
+    
+    logger.info('Candidates fetched successfully', { 
+      count: Array.isArray(data) ? data.length : 'unknown',
+      hasMore: (data as any)?.hasMore 
+    })
+    
+    return success(data, 200)
+  },
+  // Middleware configuration
+  {
+    ...MiddlewarePresets.interviewer(), // Requires interviewer role
+    validation: ValidationPresets.listCandidates.validation,
+    rateLimit: {
+      key: 'candidates:list',
+      enabled: true
+    },
+    logging: {
+      enabled: true,
+      logRequest: true,
+      logResponse: true,
+      logPerformance: true
+    }
+  }
+)
+
+/**
+ * POST /api/candidates - Create candidate with enhanced middleware
+ */
+export const POST = withMiddleware(
+  async (req: NextRequest, context: RequestContext) => {
+    const logger = getApiLogger({ operation: 'create_candidate', userId: context.user?.id })
+    const aiLogger = getAiServiceLogger()
+    
+    logger.info('Processing candidate creation request', {
+      userId: context.user?.id,
+      userRole: context.user?.role
+    })
+    
+    // Extract validated body from context
+    const candidateData = context.metadata.body
+    
+    logger.debug('Candidate data validated', { 
+      candidateName: candidateData.name,
+      hasResume: !!candidateData.resumeText 
+    })
+    
+    // Create candidate
+    let candidate = await createOrUpsertCandidate(candidateData)
+    logger.info('Candidate created in database', { candidateId: candidate.id })
+    
+    // Auto-process resume if provided
+    if (candidateData.resumeText && candidateData.resumeText.length > 50) {
+      try {
+        logger.info('Starting AI resume processing', { candidateId: candidate.id })
+        aiLogger.info('Processing resume with AI', { 
+          candidateId: candidate.id,
+          resumeLength: candidateData.resumeText.length 
+        })
+        
+        const analysis = await ask('analyze_resume', { resumeText: candidateData.resumeText })
+        
+        aiLogger.info('AI resume analysis completed', { 
+          candidateId: candidate.id,
+          qualityScore: analysis.quality_score,
+          experienceYears: analysis.experience_years 
+        })
+        
+        candidate = await updateCandidateWithResumeAnalysis({
+          id: candidate.id,
+          skills: analysis.skills,
+          experienceYears: analysis.experience_years,
+          seniorityLevel: analysis.seniority_level,
+          qualityScore: analysis.quality_score,
+          aiSummary: analysis.summary,
+          aiStrengths: analysis.strengths
+        })
+        
+        logger.info('Resume auto-processing completed successfully', { candidateId: candidate.id })
+      } catch (aiError) {
+        // Log AI processing error but don't fail the request
+        aiLogger.error('Resume auto-processing failed', 
+          aiError instanceof Error ? aiError : new Error(String(aiError)),
+          { candidateId: candidate.id }
+        )
+        logger.warn('AI resume processing failed, continuing without analysis', { 
+          candidateId: candidate.id,
+          error: aiError instanceof Error ? aiError.message : String(aiError)
+        })
+      }
+    }
+    
+    logger.info('Candidate creation completed successfully', { candidateId: candidate.id })
+    
+    return success(candidate, 201)
+  },
+  // Middleware configuration
+  {
+    ...MiddlewarePresets.interviewer(), // Requires interviewer role
+    validation: ValidationPresets.createCandidate.validation,
+    rateLimit: {
+      key: 'candidates:create',
+      enabled: true
+    },
+    logging: {
+      enabled: true,
+      logRequest: true,
+      logResponse: true,
+      logPerformance: true,
+      logBody: false // Don't log request body for privacy
+    }
+  }
+)
+
+/**
+ * Example of a public endpoint with different middleware configuration
+ */
+export const OPTIONS = withMiddleware(
+  async (req: NextRequest, context: RequestContext) => {
+    return new Response(null, { status: 200 })
+  },
+  {
+    ...MiddlewarePresets.public(), // No authentication required
+    rateLimit: {
+      key: 'candidates:options',
+      enabled: false // Disable rate limiting for OPTIONS
+    },
+    logging: {
+      enabled: false // Disable logging for OPTIONS
+    }
+  }
+)
+
+/**
+ * Example of custom middleware configuration
+ */
+export const customEndpoint = withMiddleware(
+  async (req: NextRequest, context: RequestContext) => {
+    // Custom handler logic
+    return success({ message: 'Custom endpoint' }, 200)
+  },
+  {
+    requireAuth: true,
+    requireRole: ['interviewer', 'admin'], // Multiple roles allowed
+    rateLimit: {
+      key: 'custom:endpoint',
+      enabled: true
+    },
+    validation: {
+      query: ValidationPresets.listCandidates.validation?.query,
+      body: ValidationPresets.createCandidate.validation?.body
+    },
+    logging: {
+      enabled: true,
+      logRequest: true,
+      logResponse: true,
+      logPerformance: true,
+      logHeaders: true, // Enable header logging for debugging
+      logBody: true     // Enable body logging for debugging
+    },
+    cors: {
+      enabled: true,
+      origins: ['https://example.com', 'https://app.example.com'],
+      methods: ['GET', 'POST'],
+      headers: ['Content-Type', 'Authorization', 'X-Correlation-ID'],
+      credentials: true
+    },
+    security: {
+      enableCSP: true,
+      enableXSSProtection: true,
+      enableFrameOptions: true,
+      enableContentTypeOptions: true
+    }
+  }
+)

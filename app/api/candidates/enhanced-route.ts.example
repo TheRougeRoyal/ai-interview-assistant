@@ -1,0 +1,124 @@
+/**
+ * Example of enhanced candidates API route using the new error handling system
+ * This shows how to integrate correlation tracking and standardized error handling
+ */
+
+import { NextRequest } from 'next/server'
+import { rateLimit } from '@/lib/http/rateLimit'
+import { success, handleApiError } from '@/lib/errors'
+import { CreateCandidateInput } from '@/lib/http/validation'
+import { createOrUpsertCandidate, listCandidates, updateCandidateWithResumeAnalysis } from '@/lib/db/repositories/candidatesRepo'
+import { ask } from '@/lib/ai/gateway'
+import { createApiHandler } from '@/lib/middleware/correlation'
+import { 
+  AuthenticationError, 
+  AuthorizationError, 
+  ValidationError,
+  ExternalServiceError,
+  ErrorCodes 
+} from '@/lib/errors'
+
+export const dynamic = 'force-dynamic'
+
+export const GET = createApiHandler(async (req: NextRequest) => {
+  try {
+    // Rate limiting with enhanced error handling
+    await rateLimit(req, 'candidates:list')
+    
+    // Authentication with standardized error handling
+    try {
+      const { requireInterviewer: requireInterviewerServer } = await import('@/lib/auth/server')
+      await requireInterviewerServer()
+    } catch (cookieErr) {
+      try {
+        const { requireInterviewer: requireInterviewerHeader } = await import('@/lib/auth/middleware')
+        const headerAuth = await requireInterviewerHeader(req)
+        if ((headerAuth as any).error) {
+          throw new AuthenticationError(
+            ErrorCodes.UNAUTHORIZED,
+            (headerAuth as any).error
+          )
+        }
+      } catch (bearerErr: any) {
+        const msg = (bearerErr as any)?.message || (cookieErr as any)?.message || 'Authentication required'
+        if (String(msg).includes('Insufficient')) {
+          throw new AuthorizationError('Insufficient permissions to list candidates')
+        } else {
+          throw new AuthenticationError(ErrorCodes.UNAUTHORIZED, msg)
+        }
+      }
+    }
+    
+    // Parse and validate query parameters
+    const { searchParams } = new URL(req.url)
+    const q = searchParams.get('q') || undefined
+    const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : undefined
+    const cursor = searchParams.get('cursor') || undefined
+    const sortBy = (searchParams.get('sortBy') as 'finalScore' | 'createdAt') || undefined
+    const order = (searchParams.get('order') as 'asc' | 'desc') || undefined
+    
+    // Validate limit parameter
+    if (limit !== undefined && (limit < 1 || limit > 100)) {
+      throw new ValidationError(
+        'Invalid limit parameter',
+        { limit: ['Limit must be between 1 and 100'] }
+      )
+    }
+    
+    // Fetch candidates with error handling
+    const data = await listCandidates({ q, limit, cursor, sortBy, order })
+    
+    return success(data, 200)
+  } catch (err) {
+    return handleApiError(err)
+  }
+})
+
+export const POST = createApiHandler(async (req: NextRequest) => {
+  try {
+    // Rate limiting
+    await rateLimit(req, 'candidates:create')
+    
+    // Parse and validate request body
+    let body: unknown
+    try { 
+      body = await req.json() 
+    } catch { 
+      throw new ValidationError(
+        'Invalid JSON body',
+        { body: ['Request body must be valid JSON'] }
+      )
+    }
+    
+    const parsed = CreateCandidateInput.parse(body)
+    let candidate = await createOrUpsertCandidate(parsed)
+    
+    // Auto-process resume if provided
+    if (parsed.resumeText && parsed.resumeText.length > 50) {
+      try {
+        console.log(`Auto-processing resume for candidate ${candidate.id}`)
+        const analysis = await ask('analyze_resume', { resumeText: parsed.resumeText })
+        
+        candidate = await updateCandidateWithResumeAnalysis({
+          id: candidate.id,
+          skills: analysis.skills,
+          experienceYears: analysis.experience_years,
+          seniorityLevel: analysis.seniority_level,
+          qualityScore: analysis.quality_score,
+          aiSummary: analysis.summary,
+          aiStrengths: analysis.strengths
+        })
+        
+        console.log(`Resume auto-processed for candidate ${candidate.id}`)
+      } catch (aiError) {
+        console.error('Resume auto-processing failed:', aiError)
+        // Don't fail the request if AI processing fails, just log it
+        // The candidate is still created successfully
+      }
+    }
+    
+    return success(candidate, 201)
+  } catch (err) {
+    return handleApiError(err)
+  }
+})

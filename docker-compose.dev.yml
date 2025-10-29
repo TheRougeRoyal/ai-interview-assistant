@@ -1,0 +1,68 @@
+version: '3.9'
+
+# Development-specific Docker Compose configuration
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  db:
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: interview_dev
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: interview_assistant_dev
+    volumes:
+      - ./prisma/dev.db:/var/lib/postgresql/data
+
+  redis:
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass dev_password
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      # Hot reload support
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+      AI_VENDOR: mock
+      MOCK_MODE: "true"
+    command: npm run dev
+    ports:
+      - "3000:3000"
+      - "9229:9229" # Node.js debugging port
+
+# Development-only services
+  # Database Admin UI
+  adminer:
+    image: adminer:latest
+    container_name: ai-interview-adminer
+    restart: unless-stopped
+    depends_on:
+      - db
+    ports:
+      - "8080:8080"
+    networks:
+      - interview-network
+    environment:
+      ADMINER_DEFAULT_SERVER: db
+      ADMINER_DESIGN: nette
+
+  # Redis Commander
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: ai-interview-redis-ui
+    restart: unless-stopped
+    depends_on:
+      - redis
+    ports:
+      - "8081:8081"
+    networks:
+      - interview-network
+    environment:
+      - REDIS_HOSTS=local:redis:6379:0:dev_password

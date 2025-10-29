@@ -1,0 +1,230 @@
+/**
+ * Example of enhanced candidates API route using both error handling and logging systems
+ * This shows the complete integration of correlation tracking, error handling, and structured logging
+ */
+
+import { NextRequest } from 'next/server'
+import { rateLimit } from '@/lib/http/rateLimit'
+import { success, handleApiError } from '@/lib/errors'
+import { CreateCandidateInput } from '@/lib/http/validation'
+import { createOrUpsertCandidate, listCandidates, updateCandidateWithResumeAnalysis } from '@/lib/db/repositories/candidatesRepo'
+import { ask } from '@/lib/ai/gateway'
+import { createApiHandler } from '@/lib/middleware/correlation'
+import { withApiLogging, logUserAction, logSecurityEvent } from '@/lib/logging'
+import { getApiLogger, getAiServiceLogger } from '@/lib/logging'
+import { 
+  AuthenticationError, 
+  AuthorizationError, 
+  ValidationError,
+  ExternalServiceError,
+  ErrorCodes 
+} from '@/lib/errors'
+
+export const dynamic = 'force-dynamic'
+
+// Combine correlation tracking and API logging
+const withEnhancedLogging = <T extends (...args: any[]) => any>(handler: T): T => {
+  return createApiHandler(
+    withApiLogging(handler, {
+      logRequest: true,
+      logResponse: true,
+      logPerformance: true,
+      logHeaders: false, // Set to true in development if needed
+      logBody: false     // Set to true for debugging, but be careful with sensitive data
+    })
+  )
+}
+
+export const GET = withEnhancedLogging(async (req: NextRequest) => {
+  const logger = getApiLogger({ operation: 'list_candidates' })
+  
+  try {
+    logger.info('Starting candidate list request')
+    
+    // Rate limiting with enhanced error handling
+    await rateLimit(req, 'candidates:list')
+    
+    // Authentication with standardized error handling
+    try {
+      const { requireInterviewer: requireInterviewerServer } = await import('@/lib/auth/server')
+      await requireInterviewerServer()
+      logger.info('Authentication successful')
+    } catch (cookieErr) {
+      try {
+        const { requireInterviewer: requireInterviewerHeader } = await import('@/lib/auth/middleware')
+        const headerAuth = await requireInterviewerHeader(req)
+        if ((headerAuth as any).error) {
+          logger.warn('Authentication failed via header', { error: (headerAuth as any).error })
+          throw new AuthenticationError(
+            ErrorCodes.UNAUTHORIZED,
+            (headerAuth as any).error
+          )
+        }
+      } catch (bearerErr: any) {
+        const msg = (bearerErr as any)?.message || (cookieErr as any)?.message || 'Authentication required'
+        logger.warn('Authentication failed', { error: msg })
+        
+        if (String(msg).includes('Insufficient')) {
+          // Log security event for insufficient permissions
+          logSecurityEvent(
+            'unauthorized_access',
+            'medium',
+            { resource: 'candidates', action: 'list', reason: 'insufficient_permissions' },
+            {
+              ip: req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || undefined,
+              userAgent: req.headers.get('user-agent') || undefined
+            }
+          )
+          throw new AuthorizationError('Insufficient permissions to list candidates')
+        } else {
+          throw new AuthenticationError(ErrorCodes.UNAUTHORIZED, msg)
+        }
+      }
+    }
+    
+    // Parse and validate query parameters
+    const { searchParams } = new URL(req.url)
+    const q = searchParams.get('q') || undefined
+    const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : undefined
+    const cursor = searchParams.get('cursor') || undefined
+    const sortBy = (searchParams.get('sortBy') as 'finalScore' | 'createdAt') || undefined
+    const order = (searchParams.get('order') as 'asc' | 'desc') || undefined
+    
+    logger.debug('Query parameters parsed', { q, limit, cursor, sortBy, order })
+    
+    // Validate limit parameter
+    if (limit !== undefined && (limit < 1 || limit > 100)) {
+      logger.warn('Invalid limit parameter', { limit })
+      throw new ValidationError(
+        'Invalid limit parameter',
+        { limit: ['Limit must be between 1 and 100'] }
+      )
+    }
+    
+    // Fetch candidates with error handling
+    logger.info('Fetching candidates from database')
+    const data = await listCandidates({ q, limit, cursor, sortBy, order })
+    
+    logger.info('Candidates fetched successfully', { 
+      count: Array.isArray(data) ? data.length : 'unknown',
+      hasMore: (data as any)?.hasMore 
+    })
+    
+    // Log user action
+    logUserAction('list_candidates', true, {
+      resource: 'candidates',
+      metadata: { count: Array.isArray(data) ? data.length : 'unknown', filters: { q, limit, sortBy, order } }
+    })
+    
+    return success(data, 200)
+  } catch (err) {
+    logger.error('Failed to list candidates', err instanceof Error ? err : new Error(String(err)))
+    
+    // Log failed user action
+    logUserAction('list_candidates', false, {
+      resource: 'candidates',
+      metadata: { error: err instanceof Error ? err.message : String(err) }
+    })
+    
+    return handleApiError(err)
+  }
+})
+
+export const POST = withEnhancedLogging(async (req: NextRequest) => {
+  const logger = getApiLogger({ operation: 'create_candidate' })
+  const aiLogger = getAiServiceLogger()
+  
+  try {
+    logger.info('Starting candidate creation request')
+    
+    // Rate limiting
+    await rateLimit(req, 'candidates:create')
+    
+    // Parse and validate request body
+    let body: unknown
+    try { 
+      body = await req.json() 
+      logger.debug('Request body parsed successfully')
+    } catch { 
+      logger.warn('Invalid JSON body received')
+      throw new ValidationError(
+        'Invalid JSON body',
+        { body: ['Request body must be valid JSON'] }
+      )
+    }
+    
+    const parsed = CreateCandidateInput.parse(body)
+    logger.info('Input validation successful', { 
+      candidateName: parsed.name,
+      hasResume: !!parsed.resumeText 
+    })
+    
+    let candidate = await createOrUpsertCandidate(parsed)
+    logger.info('Candidate created in database', { candidateId: candidate.id })
+    
+    // Auto-process resume if provided
+    if (parsed.resumeText && parsed.resumeText.length > 50) {
+      try {
+        logger.info('Starting AI resume processing', { candidateId: candidate.id })
+        aiLogger.info('Processing resume with AI', { 
+          candidateId: candidate.id,
+          resumeLength: parsed.resumeText.length 
+        })
+        
+        const analysis = await ask('analyze_resume', { resumeText: parsed.resumeText })
+        
+        aiLogger.info('AI resume analysis completed', { 
+          candidateId: candidate.id,
+          qualityScore: analysis.quality_score,
+          experienceYears: analysis.experience_years 
+        })
+        
+        candidate = await updateCandidateWithResumeAnalysis({
+          id: candidate.id,
+          skills: analysis.skills,
+          experienceYears: analysis.experience_years,
+          seniorityLevel: analysis.seniority_level,
+          qualityScore: analysis.quality_score,
+          aiSummary: analysis.summary,
+          aiStrengths: analysis.strengths
+        })
+        
+        logger.info('Resume auto-processing completed successfully', { candidateId: candidate.id })
+      } catch (aiError) {
+        // Log AI processing error but don't fail the request
+        aiLogger.error('Resume auto-processing failed', 
+          aiError instanceof Error ? aiError : new Error(String(aiError)),
+          { candidateId: candidate.id }
+        )
+        logger.warn('AI resume processing failed, continuing without analysis', { 
+          candidateId: candidate.id,
+          error: aiError instanceof Error ? aiError.message : String(aiError)
+        })
+      }
+    }
+    
+    // Log successful user action
+    logUserAction('create_candidate', true, {
+      resource: 'candidates',
+      resourceId: candidate.id,
+      metadata: { 
+        candidateName: candidate.name,
+        hasResumeProcessing: !!parsed.resumeText 
+      }
+    })
+    
+    logger.info('Candidate creation completed successfully', { candidateId: candidate.id })
+    
+    return success(candidate, 201)
+  } catch (err) {
+    logger.error('Failed to create candidate', err instanceof Error ? err : new Error(String(err)))
+    
+    // Log failed user action
+    logUserAction('create_candidate', false, {
+      resource: 'candidates',
+      metadata: { error: err instanceof Error ? err.message : String(err) }
+    })
+    
+    return handleApiError(err)
+  }
+})

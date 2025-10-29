@@ -1,0 +1,46 @@
+{
+  "compilerOptions": {
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "jsx": "preserve",
+    "incremental": true,
+    "forceConsistentCasingInFileNames": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    },
+    "target": "ES2020"
+  },
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    // Exclude unstable/experimental enhanced modules from strict typecheck for now
+    "store/enhanced/**",
+    "components/enhanced/**",
+    // Exclude API experimental clients/interceptors until typings are stabilized
+    "lib/api/**",
+    // Exclude Adobe SDK integration (optional, external dependency)
+    "lib/parsing/adobe-pdf.ts",
+    // Exclude tests from strict typecheck run (Vitest handles test type env)
+    "tests/**",
+    "**/__tests__/**"
+  ]
+}
