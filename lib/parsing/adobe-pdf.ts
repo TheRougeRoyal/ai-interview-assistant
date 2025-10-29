@@ -15,13 +15,23 @@ type AdobePDFServicesModule = {
 };
 
 const loadAdobeSDK = (): AdobePDFServicesModule | null => {
-  const moduleName = '@adobe/pdfservices-node-sdk';
-  const runtimeRequire =
-    typeof __non_webpack_require__ !== 'undefined'
-      ? __non_webpack_require__
-      : typeof require !== 'undefined'
-        ? (require as (modulePath: string) => AdobePDFServicesModule)
-        : null;
+  const moduleName = '@adobe/' + 'pdfservices-node-sdk';
+
+  let runtimeRequire: ((modulePath: string) => unknown) | null = null;
+
+  if (typeof __non_webpack_require__ !== 'undefined') {
+    runtimeRequire = __non_webpack_require__;
+  }
+
+  if (!runtimeRequire) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-implied-eval
+      const evaluatedRequire = (eval('require') as ((modulePath: string) => unknown) | undefined) ?? null;
+      runtimeRequire = typeof evaluatedRequire === 'function' ? evaluatedRequire : null;
+    } catch {
+      runtimeRequire = null;
+    }
+  }
 
   if (!runtimeRequire) {
     console.warn('Runtime require is not available to load Adobe PDF Services SDK');
@@ -29,7 +39,7 @@ const loadAdobeSDK = (): AdobePDFServicesModule | null => {
   }
 
   try {
-    return runtimeRequire(moduleName);
+    return runtimeRequire(moduleName) as AdobePDFServicesModule;
   } catch (error) {
     console.warn('Adobe PDF Services SDK is not available:', error);
     return null;
