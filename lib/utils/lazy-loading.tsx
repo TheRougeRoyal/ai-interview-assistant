@@ -34,14 +34,14 @@ export function DefaultErrorComponent({ error }: { error: Error }) {
 /**
  * Create a lazily loaded component
  */
-export function createLazyComponent<T extends ComponentType<any>>(
-  importFn: () => Promise<{ default: T }>,
+export function createLazyComponent<TProps>(
+  importFn: () => Promise<{ default: ComponentType<TProps> }>,
   ssr = true
-) {
+): ComponentType<TProps> {
   return dynamic(importFn, {
     loading: DefaultLoadingComponent,
     ssr,
-  })
+  }) as ComponentType<TProps>
 }
 
 /**
@@ -98,6 +98,6 @@ export const LazyEnhancedResumeUploader = createLazyComponent(
 /**
  * Preload a component (useful for prefetching on hover/focus)
  */
-export function preloadComponent(importFn: () => Promise<any>) {
+export function preloadComponent<TModule>(importFn: () => Promise<TModule>) {
   return importFn()
 }

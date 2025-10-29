@@ -2,7 +2,7 @@ type EventMap = {
   'candidate:finalized': { candidateId: string }
 }
 
-type EventHandler<T = any> = (data: T) => void
+type EventHandler<T> = (data: T) => void
 
 class EventEmitter {
   private events = new Map<string, Set<EventHandler>>()
