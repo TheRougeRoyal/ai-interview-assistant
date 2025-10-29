@@ -16,7 +16,12 @@ const nextConfig = {
       ...config.resolve.alias,
       canvas: false,
     };
-    config.externals = [...config.externals, 'canvas'];
+    const externals = Array.isArray(config.externals) ? config.externals : [];
+    config.externals = [
+      ...externals,
+      'canvas',
+      'commonjs @adobe/pdfservices-node-sdk',
+    ];
     return config;
   },
 }
